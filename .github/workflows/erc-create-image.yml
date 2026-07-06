@@ -2,7 +2,7 @@ name: "Create ERC image"
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "master", "github-actions"]
 
 env:
   ECR_REPOSITORY: "profile-backend-lambda"
