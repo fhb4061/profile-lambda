@@ -2,7 +2,7 @@ name: "Build, Push to ECR, and Deploy to Lambda"
 
 on:
   push:
-    branches: [ "master", "github-actions"]
+    branches: [ "master"]
 
 env:
   ECR_REPOSITORY: "profile-backend-lambda"
