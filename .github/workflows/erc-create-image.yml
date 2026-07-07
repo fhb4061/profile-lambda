@@ -1,4 +1,4 @@
-name: "Build, Push to ECR, and Deploy to Lambda"
+name: "Build and Push to ECR"
 
 on:
   push:
