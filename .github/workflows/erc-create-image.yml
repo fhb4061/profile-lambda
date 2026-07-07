@@ -1,4 +1,4 @@
-name: "Create ERC image"
+name: "Build, Push to ECR, and Deploy to Lambda"
 
 on:
   push:
@@ -19,6 +19,18 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'corretto'
+          cache: 'gradle'
+
+      - name: Build with Gradle
+        run: |
+          chmod +x gradlew
+          ./gradlew build -x test
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v6.1.0
