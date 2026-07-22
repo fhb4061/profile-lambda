@@ -1,7 +1,9 @@
 FROM public.ecr.aws/lambda/java:25
 
-# Copy function code and runtime dependencies from Gradle layout
+# Function classes and runtime dependencies from the Gradle build
 COPY build/classes/java/main ${LAMBDA_TASK_ROOT}
+COPY build/dependencies ${LAMBDA_TASK_ROOT}/lib
 
-# Set the CMD to your handler (could also be done as a paraLAMBDA_TASK_ROOTmeter override outside of the Dockerfile)
-CMD [ "profile.ProfileManager::handleRequest" ]
+# Default handler: API monolith. The post-confirmation trigger uses the same
+# image with a CMD override of "com.profile.PostConfirmationHandler::handleRequest".
+CMD [ "com.profile.ProfileApiHandler::handleRequest" ]
