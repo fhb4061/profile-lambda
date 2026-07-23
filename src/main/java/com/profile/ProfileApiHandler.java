@@ -51,15 +51,22 @@ public class ProfileApiHandler
 
     @Override
     public APIGatewayProxyResponseEvent handleRequest(APIGatewayProxyRequestEvent event, Context context) {
-        String callerSub = callerSub(event);
-        String route = event.getHttpMethod() + " " + event.getResource();
-        return switch (route) {
-            case "GET /profile" -> getOwnProfile(callerSub);
-            case "PUT /profile" -> updateOwnProfile(callerSub, event.getBody());
-            case "GET /profiles" -> listProfiles(event.getQueryStringParameters());
-            case "GET /profiles/{sub}" -> getPublicProfile(event.getPathParameters().get("sub"));
-            default -> json(404, "{\"message\":\"not found\"}");
-        };
+        try {
+            String callerSub = callerSub(event);
+            String route = event.getHttpMethod() + " " + event.getResource();
+            return switch (route) {
+                case "GET /profile" -> getOwnProfile(callerSub);
+                case "PUT /profile" -> updateOwnProfile(callerSub, event.getBody());
+                case "GET /profiles" -> listProfiles(event.getQueryStringParameters());
+                case "GET /profiles/{sub}" -> getPublicProfile(event.getPathParameters().get("sub"));
+                default -> json(404, "{\"message\":\"not found\"}");
+            };
+        } catch (Exception e) {
+            // Proxy integration means an uncaught exception skips json() (and its CORS
+            // headers) entirely, leaving the browser with a headerless response it blocks.
+            e.printStackTrace();
+            return json(500, "{\"message\":\"internal error\"}");
+        }
     }
 
     private APIGatewayProxyResponseEvent getOwnProfile(String callerSub) {
@@ -184,10 +191,19 @@ public class ProfileApiHandler
         return claims.get("sub");
     }
 
+    /** API Gateway uses Lambda proxy integration, so it passes the response through as-is
+     *  — these headers must be set on every response here, not left to API Gateway. */
+    private static final Map<String, String> CORS_HEADERS = Map.of(
+            "Access-Control-Allow-Origin", "*",
+            "Access-Control-Allow-Methods", "GET,PUT,OPTIONS",
+            "Access-Control-Allow-Headers", "Content-Type,Authorization");
+
     private static APIGatewayProxyResponseEvent json(int statusCode, String body) {
+        Map<String, String> headers = new HashMap<>(CORS_HEADERS);
+        headers.put("Content-Type", "application/json");
         return new APIGatewayProxyResponseEvent()
                 .withStatusCode(statusCode)
-                .withHeaders(Map.of("Content-Type", "application/json"))
+                .withHeaders(headers)
                 .withBody(body);
     }
 }
