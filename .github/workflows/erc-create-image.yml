@@ -52,23 +52,3 @@ jobs:
 
           # Push to ECR
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-
-      # DockerImageCode.fromEcr pins the digest at CDK-deploy time, so pushing to
-      # ECR alone changes nothing — both functions must be pointed at the new image.
-      - name: Update Lambda functions to new image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          IMAGE_URI=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-
-          API_FN=$(aws cloudformation describe-stacks --stack-name BackendStack \
-            --query "Stacks[0].Outputs[?OutputKey=='ApiFunctionName'].OutputValue" --output text)
-          TRIGGER_FN=$(aws cloudformation describe-stacks --stack-name CognitoStack \
-            --query "Stacks[0].Outputs[?OutputKey=='PostConfirmationFunctionName'].OutputValue" --output text)
-
-          aws lambda update-function-code --function-name "$API_FN" --image-uri "$IMAGE_URI"
-          aws lambda update-function-code --function-name "$TRIGGER_FN" --image-uri "$IMAGE_URI"
-
-          aws lambda wait function-updated --function-name "$API_FN"
-          aws lambda wait function-updated --function-name "$TRIGGER_FN"
