@@ -14,7 +14,14 @@ dependencies {
     implementation 'com.amazonaws:aws-lambda-java-core:1.2.2'
     implementation 'com.amazonaws:aws-lambda-java-events:3.11.1'
     implementation platform('software.amazon.awssdk:bom:2.25.31')
-    implementation 'software.amazon.awssdk:dynamodb'
+    implementation('software.amazon.awssdk:dynamodb') {
+        // Async (netty) is unused and apache-client is unnecessary connection-pooling
+        // overhead for Lambda's one-request-per-invocation model — url-connection-client
+        // is lighter to class-load, which matters on a memory/CPU-constrained function.
+        exclude group: 'software.amazon.awssdk', module: 'netty-nio-client'
+        exclude group: 'software.amazon.awssdk', module: 'apache-client'
+    }
+    implementation 'software.amazon.awssdk:url-connection-client'
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.1'
 
     testImplementation platform('org.junit:junit-bom:5.10.0')

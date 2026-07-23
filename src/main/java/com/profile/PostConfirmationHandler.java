@@ -3,6 +3,7 @@ package com.profile;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.events.CognitoUserPoolPostConfirmationEvent;
+import software.amazon.awssdk.http.urlconnection.UrlConnectionHttpClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedException;
@@ -22,7 +23,9 @@ public class PostConfirmationHandler
     private final String tableName;
 
     public PostConfirmationHandler() {
-        this(DynamoDbClient.create(), System.getenv("PROFILE_TABLE"));
+        this(DynamoDbClient.builder()
+                .httpClientBuilder(UrlConnectionHttpClient.builder())
+                .build(), System.getenv("PROFILE_TABLE"));
     }
 
     PostConfirmationHandler(DynamoDbClient dynamoDb, String tableName) {

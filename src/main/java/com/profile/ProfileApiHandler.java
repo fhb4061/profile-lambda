@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import software.amazon.awssdk.http.urlconnection.UrlConnectionHttpClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedException;
@@ -38,7 +39,9 @@ public class ProfileApiHandler
     private final String tableName;
 
     public ProfileApiHandler() {
-        this(DynamoDbClient.create(), System.getenv("PROFILE_TABLE"));
+        this(DynamoDbClient.builder()
+                .httpClientBuilder(UrlConnectionHttpClient.builder())
+                .build(), System.getenv("PROFILE_TABLE"));
     }
 
     ProfileApiHandler(DynamoDbClient dynamoDb, String tableName) {
