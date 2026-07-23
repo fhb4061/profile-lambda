@@ -20,11 +20,11 @@ Build: Gradle (`build.gradle`), plain `java` plugin, AWS SDK v2 for DynamoDB, aw
 
 Actual AWS infra (CDK stacks `BackendStack`, `CognitoStack`) lives **outside this repo** — this repo only builds/pushes the container image.
 
-`DockerImageCode.fromEcr` pins the image digest at CDK-deploy time, so pushing to ECR alone changes nothing. CI (`.github/workflows/erc-create-image.yml`, triggers on push to `master`) explicitly runs `aws lambda update-function-code` for both the API function and the post-confirmation trigger function after every ECR push.
+`DockerImageCode.fromEcr` pins the image digest at CDK-deploy time, so pushing to ECR alone changes nothing on its own — CI (`.github/workflows/erc-create-image.yml`, triggers on push to `master`) only builds/tags/pushes the image; it deliberately does **not** update the Lambda functions. Tane updates both functions to the new image manually for now (was previously automated via `aws lambda update-function-code`, removed on purpose).
 
-CI flow: build+test with Gradle → assume AWS role via OIDC (`github-action-role`, region `ap-southeast-2`) → build/tag/push image to ECR repo `profile-backend-lambda` → update both Lambda functions' code, wait for update.
+CI flow: build+test with Gradle → assume AWS role via OIDC (`github-action-role`, region `ap-southeast-2`) → build/tag/push image to ECR repo `profile-backend-lambda`.
 
-If you rename a handler class or change the image's CMD, update both the `Dockerfile` and the CI workflow's function-name lookups.
+If you rename a handler class or change the image's CMD, update the `Dockerfile`.
 
 ## Branching
 
