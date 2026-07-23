@@ -10,6 +10,7 @@ import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -168,6 +169,33 @@ class ProfileApiHandlerTest {
     void thereIsNoDeleteOrCreateEndpoint() {
         assertEquals(404, handler.handleRequest(request("DELETE", "/profile", "sub-123"), null).getStatusCode());
         assertEquals(404, handler.handleRequest(request("POST", "/profiles", "sub-123"), null).getStatusCode());
+    }
+
+    @Test
+    void everyResponseHasCorsHeadersOnSuccessAnd404Paths() {
+        List<APIGatewayProxyResponseEvent> responses = List.of(
+                handler.handleRequest(request("GET", "/profile", "sub-123"), null),
+                handler.handleRequest(request("GET", "/profile", "sub-unknown"), null),
+                handler.handleRequest(request("DELETE", "/profile", "sub-123"), null));
+
+        for (APIGatewayProxyResponseEvent response : responses) {
+            assertEquals("*", response.getHeaders().get("Access-Control-Allow-Origin"));
+            assertEquals("GET,PUT,OPTIONS", response.getHeaders().get("Access-Control-Allow-Methods"));
+            assertEquals("Content-Type,Authorization", response.getHeaders().get("Access-Control-Allow-Headers"));
+        }
+    }
+
+    @Test
+    void uncaughtExceptionStillReturns500WithCorsHeaders() {
+        // No requestContext/authorizer set, so callerSub() throws before any route runs.
+        APIGatewayProxyRequestEvent malformed = new APIGatewayProxyRequestEvent()
+                .withHttpMethod("GET")
+                .withResource("/profile");
+
+        APIGatewayProxyResponseEvent response = handler.handleRequest(malformed, null);
+
+        assertEquals(500, response.getStatusCode());
+        assertEquals("*", response.getHeaders().get("Access-Control-Allow-Origin"));
     }
 
     /** Request as API Gateway delivers it after the Cognito authorizer has verified the JWT. */
