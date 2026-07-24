@@ -42,7 +42,7 @@ public class PostConfirmationHandler
         Map<String, String> attributes = event.getRequest().getUserAttributes();
         Profile profile = new Profile(
                 attributes.get("sub"), attributes.get("email"),
-                attributes.get("given_name"), attributes.get("family_name"));
+                attributes.get("given_name"), attributes.get("family_name"), null);
         try {
             dynamoDb.putItem(PutItemRequest.builder()
                     .tableName(tableName)

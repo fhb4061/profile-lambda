@@ -4,17 +4,20 @@ Personal learning project (Tane, github: fhb4061): Java 25 AWS Lambda managing u
 
 ## Architecture
 
-Single Docker image (`public.ecr.aws/lambda/java:25`), two handlers sharing one codebase, selected via Lambda CMD override:
+Single Docker image (`public.ecr.aws/lambda/java:25`), three handlers sharing one codebase, selected via Lambda CMD override:
 
 - `com.profile.ProfileApiHandler` — API Gateway + Cognito authorizer backend.
   - `GET /profile`, `PUT /profile` — caller's own profile
   - `GET /profiles` — paginated public listing
   - `GET /profiles/{sub}` — public view of one profile
+  - `POST /profile/photo` — presigned S3 POST (key `photos/{sub}/{uuid}`) for the caller's own profile photo upload
   - Caller identity always comes from the verified JWT `sub` claim (never body/path) — deliberate security choice.
-  - Public fields are allowlisted (`sub`, `givenName`, `familyName`); email etc. stays private.
+  - Public fields are allowlisted (`sub`, `givenName`, `familyName`, `photoUrl` when a photo exists); email etc. stays private.
+  - `com.profile.PresignedPostPolicy` hand-rolls the SigV4 POST-policy signature — neither AWS SDK v1 nor v2 has a built-in API for browser-form POST uploads.
 - `com.profile.PostConfirmationHandler` — Cognito post-confirmation trigger. Creates the DynamoDB profile row on sign-up. Guards against also firing on password-reset confirmation.
+- `com.profile.PhotoValidationHandler` — S3 `ObjectCreated` trigger on the `photos/` prefix. Verifies the upload is really an image via magic bytes/dimensions (JDK `ImageIO` for JPEG/PNG, hand-rolled `com.profile.WebPImage` header parser for WebP, since the JDK ships no WebP reader) — never trusts the client-declared content-type. Rejects (deletes the object, touches no DynamoDB) anything that isn't a real image ≤4096×4096; on success, links the new `photoKey` to the profile row and cleans up the previous photo object if one existed.
 
-Build: Gradle (`build.gradle`), plain `java` plugin, AWS SDK v2 for DynamoDB, aws-lambda-java-core/events, Jackson. Tests use an `InMemoryDynamoDb` test double instead of mocks (JUnit 5).
+Build: Gradle (`build.gradle`), plain `java` plugin, AWS SDK v2 for DynamoDB/S3, aws-lambda-java-core/events, Jackson. Tests use `InMemoryDynamoDb`/`InMemoryS3` test doubles instead of mocks (JUnit 5).
 
 ## Infra
 
