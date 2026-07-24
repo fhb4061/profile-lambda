@@ -12,7 +12,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import software.amazon.awssdk.http.urlconnection.UrlConnectionHttpClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
-import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedException;
 import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
 import software.amazon.awssdk.services.dynamodb.model.GetItemResponse;
 import software.amazon.awssdk.services.dynamodb.model.ScanRequest;
@@ -83,7 +82,7 @@ public class ProfileApiHandler
     }
 
     /** Attributes safe to show other users — email and anything else is PII and stays private. */
-    private static final List<String> PUBLIC_FIELDS = List.of("sub", "givenName", "familyName");
+    private static final List<String> PUBLIC_FIELDS = List.of("sub", "givenName", "familyName", "initials");
 
     private APIGatewayProxyResponseEvent getPublicProfile(String sub) {
         GetItemResponse response = dynamoDb.getItem(GetItemRequest.builder()
@@ -169,18 +168,31 @@ public class ProfileApiHandler
         if (assignments.isEmpty()) {
             return json(400, "{\"message\":\"no editable fields in body\"}");
         }
-        try {
-            dynamoDb.updateItem(UpdateItemRequest.builder()
-                    .tableName(tableName)
-                    .key(Map.of("sub", AttributeValue.fromS(callerSub)))
-                    .updateExpression("SET " + String.join(", ", assignments))
-                    .conditionExpression("attribute_exists(#sub)")
-                    .expressionAttributeNames(names)
-                    .expressionAttributeValues(values)
-                    .build());
-        } catch (ConditionalCheckFailedException noRow) {
+
+        GetItemResponse existing = dynamoDb.getItem(GetItemRequest.builder()
+                .tableName(tableName)
+                .key(Map.of("sub", AttributeValue.fromS(callerSub)))
+                .build());
+        if (!existing.hasItem()) {
             return json(404, "{\"message\":\"profile not found\"}");
         }
+        String givenName = values.containsKey(":givenName")
+                ? values.get(":givenName").s()
+                : existing.item().getOrDefault("givenName", AttributeValue.fromS("")).s();
+        String familyName = values.containsKey(":familyName")
+                ? values.get(":familyName").s()
+                : existing.item().getOrDefault("familyName", AttributeValue.fromS("")).s();
+        names.put("#initials", "initials");
+        values.put(":initials", AttributeValue.fromS(Initials.of(givenName, familyName)));
+        assignments.add("#initials = :initials");
+
+        dynamoDb.updateItem(UpdateItemRequest.builder()
+                .tableName(tableName)
+                .key(Map.of("sub", AttributeValue.fromS(callerSub)))
+                .updateExpression("SET " + String.join(", ", assignments))
+                .expressionAttributeNames(names)
+                .expressionAttributeValues(values)
+                .build());
         return getOwnProfile(callerSub);
     }
 

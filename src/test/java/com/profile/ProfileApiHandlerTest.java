@@ -35,7 +35,8 @@ class ProfileApiHandlerTest {
                 "sub", AttributeValue.fromS("sub-123"),
                 "email", AttributeValue.fromS("amy@example.com"),
                 "givenName", AttributeValue.fromS("Amy"),
-                "familyName", AttributeValue.fromS("Pond")));
+                "familyName", AttributeValue.fromS("Pond"),
+                "initials", AttributeValue.fromS("AP")));
     }
 
     @Test
@@ -49,6 +50,7 @@ class ProfileApiHandlerTest {
         assertEquals("amy@example.com", body.get("email").asText());
         assertEquals("Amy", body.get("givenName").asText());
         assertEquals("Pond", body.get("familyName").asText());
+        assertEquals("AP", body.get("initials").asText());
     }
 
     @Test
@@ -75,7 +77,20 @@ class ProfileApiHandlerTest {
         assertEquals("Williams", updated.get("familyName").asText());
         assertEquals("amy@example.com", updated.get("email").asText());
         assertEquals("sub-123", updated.get("sub").asText());
+        assertEquals("AW", updated.get("initials").asText());
         assertNull(db.item("sub-victim"), "sub from body must never be written");
+    }
+
+    @Test
+    void putProfileRecomputesInitialsFromOnlyTheFieldBeingChanged() throws Exception {
+        APIGatewayProxyResponseEvent putResponse = handler.handleRequest(
+                request("PUT", "/profile", "sub-123").withBody("{\"familyName\":\"Williams\"}"), null);
+
+        assertEquals(200, putResponse.getStatusCode());
+        JsonNode updated = JSON.readTree(putResponse.getBody());
+        assertEquals("Amy", updated.get("givenName").asText(), "untouched field must be preserved");
+        assertEquals("Williams", updated.get("familyName").asText());
+        assertEquals("AW", updated.get("initials").asText(), "initials must merge stored + new name");
     }
 
     @Test
@@ -98,6 +113,7 @@ class ProfileApiHandlerTest {
         assertEquals("sub-123", body.get("sub").asText());
         assertEquals("Amy", body.get("givenName").asText());
         assertEquals("Pond", body.get("familyName").asText());
+        assertEquals("AP", body.get("initials").asText());
         assertFalse(body.has("email"), "email is PII and must never appear in public views");
     }
 
@@ -117,7 +133,8 @@ class ProfileApiHandlerTest {
                 "sub", AttributeValue.fromS("sub-456"),
                 "email", AttributeValue.fromS("rory@example.com"),
                 "givenName", AttributeValue.fromS("Rory"),
-                "familyName", AttributeValue.fromS("Williams")));
+                "familyName", AttributeValue.fromS("Williams"),
+                "initials", AttributeValue.fromS("RW")));
 
         APIGatewayProxyResponseEvent response =
                 handler.handleRequest(request("GET", "/profiles", "sub-456"), null);
@@ -129,7 +146,9 @@ class ProfileApiHandlerTest {
             assertFalse(item.has("email"), "directory must never leak email");
         }
         assertEquals("Amy", items.get(0).get("givenName").asText());
+        assertEquals("AP", items.get(0).get("initials").asText());
         assertEquals("Rory", items.get(1).get("givenName").asText());
+        assertEquals("RW", items.get(1).get("initials").asText());
     }
 
     @Test

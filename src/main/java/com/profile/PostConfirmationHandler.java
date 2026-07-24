@@ -46,6 +46,8 @@ public class PostConfirmationHandler
         item.put("email", AttributeValue.fromS(attributes.get("email")));
         item.put("givenName", AttributeValue.fromS(attributes.get("given_name")));
         item.put("familyName", AttributeValue.fromS(attributes.get("family_name")));
+        item.put("initials", AttributeValue.fromS(
+                Initials.of(attributes.get("given_name"), attributes.get("family_name"))));
         try {
             dynamoDb.putItem(PutItemRequest.builder()
                     .tableName(tableName)

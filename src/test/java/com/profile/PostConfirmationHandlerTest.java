@@ -38,6 +38,7 @@ class PostConfirmationHandlerTest {
         assertEquals("amy@example.com", row.get("email").s());
         assertEquals("Amy", row.get("givenName").s());
         assertEquals("Pond", row.get("familyName").s());
+        assertEquals("AP", row.get("initials").s());
     }
 
     @Test
