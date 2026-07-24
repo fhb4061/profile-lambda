@@ -9,18 +9,17 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.profile.model.Profile;
 import software.amazon.awssdk.http.urlconnection.UrlConnectionHttpClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
-import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedException;
 import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
 import software.amazon.awssdk.services.dynamodb.model.GetItemResponse;
+import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
 import software.amazon.awssdk.services.dynamodb.model.ScanRequest;
 import software.amazon.awssdk.services.dynamodb.model.ScanResponse;
-import software.amazon.awssdk.services.dynamodb.model.UpdateItemRequest;
 
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
@@ -77,13 +76,18 @@ public class ProfileApiHandler
         if (!response.hasItem()) {
             return json(404, "{\"message\":\"profile not found\"}");
         }
-        ObjectNode body = JSON.createObjectNode();
-        response.item().forEach((name, value) -> body.put(name, value.s()));
-        return json(200, body.toString());
+        return json(200, ownView(Profile.fromItem(response.item())).toString());
     }
 
-    /** Attributes safe to show other users — email and anything else is PII and stays private. */
-    private static final List<String> PUBLIC_FIELDS = List.of("sub", "givenName", "familyName");
+    private static ObjectNode ownView(Profile profile) {
+        ObjectNode node = JSON.createObjectNode();
+        node.put("sub", profile.sub());
+        node.put("email", profile.email());
+        node.put("givenName", profile.givenName());
+        node.put("familyName", profile.familyName());
+        node.put("initials", profile.initials());
+        return node;
+    }
 
     private APIGatewayProxyResponseEvent getPublicProfile(String sub) {
         GetItemResponse response = dynamoDb.getItem(GetItemRequest.builder()
@@ -93,7 +97,7 @@ public class ProfileApiHandler
         if (!response.hasItem()) {
             return json(404, "{\"message\":\"profile not found\"}");
         }
-        return json(200, publicView(response.item()).toString());
+        return json(200, publicView(Profile.fromItem(response.item())).toString());
     }
 
     private static final int DEFAULT_PAGE_SIZE = 25;
@@ -125,7 +129,7 @@ public class ProfileApiHandler
         ScanResponse response = dynamoDb.scan(scan.build());
         ObjectNode body = JSON.createObjectNode();
         ArrayNode items = body.putArray("items");
-        response.items().forEach(item -> items.add(publicView(item)));
+        response.items().forEach(item -> items.add(publicView(Profile.fromItem(item))));
         if (response.hasLastEvaluatedKey()) {
             String lastSub = response.lastEvaluatedKey().get("sub").s();
             body.put("nextToken", Base64.getUrlEncoder().withoutPadding()
@@ -134,14 +138,13 @@ public class ProfileApiHandler
         return json(200, body.toString());
     }
 
-    private static ObjectNode publicView(Map<String, AttributeValue> item) {
+    /** Attributes safe to show other users — email is PII and stays private. */
+    private static ObjectNode publicView(Profile profile) {
         ObjectNode node = JSON.createObjectNode();
-        for (String field : PUBLIC_FIELDS) {
-            AttributeValue value = item.get(field);
-            if (value != null) {
-                node.put(field, value.s());
-            }
-        }
+        node.put("sub", profile.sub());
+        node.put("givenName", profile.givenName());
+        node.put("familyName", profile.familyName());
+        node.put("initials", profile.initials());
         return node;
     }
 
@@ -155,33 +158,35 @@ public class ProfileApiHandler
         } catch (JsonProcessingException e) {
             return json(400, "{\"message\":\"invalid JSON body\"}");
         }
-        Map<String, String> names = new HashMap<>(Map.of("#sub", "sub"));
-        Map<String, AttributeValue> values = new HashMap<>();
-        List<String> assignments = new ArrayList<>();
+        Map<String, String> edits = new HashMap<>();
         for (String field : EDITABLE_FIELDS) {
             JsonNode value = requested.get(field);
             if (value != null && value.isTextual()) {
-                names.put("#" + field, field);
-                values.put(":" + field, AttributeValue.fromS(value.asText()));
-                assignments.add("#" + field + " = :" + field);
+                edits.put(field, value.asText());
             }
         }
-        if (assignments.isEmpty()) {
+        if (edits.isEmpty()) {
             return json(400, "{\"message\":\"no editable fields in body\"}");
         }
-        try {
-            dynamoDb.updateItem(UpdateItemRequest.builder()
-                    .tableName(tableName)
-                    .key(Map.of("sub", AttributeValue.fromS(callerSub)))
-                    .updateExpression("SET " + String.join(", ", assignments))
-                    .conditionExpression("attribute_exists(#sub)")
-                    .expressionAttributeNames(names)
-                    .expressionAttributeValues(values)
-                    .build());
-        } catch (ConditionalCheckFailedException noRow) {
+
+        GetItemResponse existing = dynamoDb.getItem(GetItemRequest.builder()
+                .tableName(tableName)
+                .key(Map.of("sub", AttributeValue.fromS(callerSub)))
+                .build());
+        if (!existing.hasItem()) {
             return json(404, "{\"message\":\"profile not found\"}");
         }
-        return getOwnProfile(callerSub);
+        Profile current = Profile.fromItem(existing.item());
+        Profile updated = new Profile(
+                current.sub(), current.email(),
+                edits.getOrDefault("givenName", current.givenName()),
+                edits.getOrDefault("familyName", current.familyName()));
+
+        dynamoDb.putItem(PutItemRequest.builder()
+                .tableName(tableName)
+                .item(updated.toItem())
+                .build());
+        return json(200, ownView(updated).toString());
     }
 
     @SuppressWarnings("unchecked")

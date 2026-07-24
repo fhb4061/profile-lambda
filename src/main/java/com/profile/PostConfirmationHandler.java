@@ -3,13 +3,12 @@ package com.profile;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.events.CognitoUserPoolPostConfirmationEvent;
+import com.profile.model.Profile;
 import software.amazon.awssdk.http.urlconnection.UrlConnectionHttpClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
-import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedException;
 import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
 
-import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -41,15 +40,13 @@ public class PostConfirmationHandler
             return event;
         }
         Map<String, String> attributes = event.getRequest().getUserAttributes();
-        Map<String, AttributeValue> item = new HashMap<>();
-        item.put("sub", AttributeValue.fromS(attributes.get("sub")));
-        item.put("email", AttributeValue.fromS(attributes.get("email")));
-        item.put("givenName", AttributeValue.fromS(attributes.get("given_name")));
-        item.put("familyName", AttributeValue.fromS(attributes.get("family_name")));
+        Profile profile = new Profile(
+                attributes.get("sub"), attributes.get("email"),
+                attributes.get("given_name"), attributes.get("family_name"));
         try {
             dynamoDb.putItem(PutItemRequest.builder()
                     .tableName(tableName)
-                    .item(item)
+                    .item(profile.toItem())
                     .conditionExpression("attribute_not_exists(#sub)")
                     .expressionAttributeNames(Map.of("#sub", "sub"))
                     .build());
