@@ -10,6 +10,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.profile.model.Profile;
+import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
+import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.http.urlconnection.UrlConnectionHttpClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
@@ -20,10 +22,13 @@ import software.amazon.awssdk.services.dynamodb.model.ScanRequest;
 import software.amazon.awssdk.services.dynamodb.model.ScanResponse;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * API monolith behind the API Gateway Cognito authorizer. Caller identity is
@@ -36,16 +41,27 @@ public class ProfileApiHandler
 
     private final DynamoDbClient dynamoDb;
     private final String tableName;
+    private final String photoBucket;
+    private final String cloudFrontDomain;
+    private final AwsCredentialsProvider credentialsProvider;
+    private final String region;
 
     public ProfileApiHandler() {
         this(DynamoDbClient.builder()
-                .httpClientBuilder(UrlConnectionHttpClient.builder())
-                .build(), System.getenv("PROFILE_TABLE"));
+                        .httpClientBuilder(UrlConnectionHttpClient.builder())
+                        .build(), System.getenv("PROFILE_TABLE"),
+                System.getenv("PHOTO_BUCKET"), System.getenv("CLOUDFRONT_DOMAIN"),
+                DefaultCredentialsProvider.create(), System.getenv("AWS_REGION"));
     }
 
-    ProfileApiHandler(DynamoDbClient dynamoDb, String tableName) {
+    ProfileApiHandler(DynamoDbClient dynamoDb, String tableName, String photoBucket, String cloudFrontDomain,
+            AwsCredentialsProvider credentialsProvider, String region) {
         this.dynamoDb = dynamoDb;
         this.tableName = tableName;
+        this.photoBucket = photoBucket;
+        this.cloudFrontDomain = cloudFrontDomain;
+        this.credentialsProvider = credentialsProvider;
+        this.region = region;
     }
 
     @Override
@@ -58,6 +74,7 @@ public class ProfileApiHandler
                 case "PUT /profile" -> updateOwnProfile(callerSub, event.getBody());
                 case "GET /profiles" -> listProfiles(event.getQueryStringParameters());
                 case "GET /profiles/{sub}" -> getPublicProfile(event.getPathParameters().get("sub"));
+                case "POST /profile/photo" -> requestPhotoUpload(callerSub);
                 default -> json(404, "{\"message\":\"not found\"}");
             };
         } catch (Exception e) {
@@ -79,13 +96,16 @@ public class ProfileApiHandler
         return json(200, ownView(Profile.fromItem(response.item())).toString());
     }
 
-    private static ObjectNode ownView(Profile profile) {
+    private ObjectNode ownView(Profile profile) {
         ObjectNode node = JSON.createObjectNode();
         node.put("sub", profile.sub());
         node.put("email", profile.email());
         node.put("givenName", profile.givenName());
         node.put("familyName", profile.familyName());
         node.put("initials", profile.initials());
+        if (profile.photoKey() != null) {
+            node.put("photoUrl", "https://" + cloudFrontDomain + "/" + profile.photoKey());
+        }
         return node;
     }
 
@@ -139,12 +159,15 @@ public class ProfileApiHandler
     }
 
     /** Attributes safe to show other users — email is PII and stays private. */
-    private static ObjectNode publicView(Profile profile) {
+    private ObjectNode publicView(Profile profile) {
         ObjectNode node = JSON.createObjectNode();
         node.put("sub", profile.sub());
         node.put("givenName", profile.givenName());
         node.put("familyName", profile.familyName());
         node.put("initials", profile.initials());
+        if (profile.photoKey() != null) {
+            node.put("photoUrl", "https://" + cloudFrontDomain + "/" + profile.photoKey());
+        }
         return node;
     }
 
@@ -180,13 +203,31 @@ public class ProfileApiHandler
         Profile updated = new Profile(
                 current.sub(), current.email(),
                 edits.getOrDefault("givenName", current.givenName()),
-                edits.getOrDefault("familyName", current.familyName()));
+                edits.getOrDefault("familyName", current.familyName()),
+                current.photoKey());
 
         dynamoDb.putItem(PutItemRequest.builder()
                 .tableName(tableName)
                 .item(updated.toItem())
                 .build());
         return json(200, ownView(updated).toString());
+    }
+
+    private static final long MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+    private static final Duration PHOTO_UPLOAD_EXPIRY = Duration.ofMinutes(5);
+
+    private APIGatewayProxyResponseEvent requestPhotoUpload(String callerSub) {
+        String key = "photos/" + callerSub + "/" + UUID.randomUUID();
+        PresignedPostPolicy.Result presigned = PresignedPostPolicy.generate(
+                photoBucket, region, key,
+                credentialsProvider.resolveCredentials(), Instant.now(), PHOTO_UPLOAD_EXPIRY,
+                MAX_PHOTO_BYTES, "image/");
+
+        ObjectNode body = JSON.createObjectNode();
+        body.put("url", presigned.url());
+        ObjectNode fields = body.putObject("fields");
+        presigned.fields().forEach(fields::put);
+        return json(200, body.toString());
     }
 
     @SuppressWarnings("unchecked")
@@ -200,7 +241,7 @@ public class ProfileApiHandler
      *  — these headers must be set on every response here, not left to API Gateway. */
     private static final Map<String, String> CORS_HEADERS = Map.of(
             "Access-Control-Allow-Origin", "*",
-            "Access-Control-Allow-Methods", "GET,PUT,OPTIONS",
+            "Access-Control-Allow-Methods", "GET,PUT,POST,OPTIONS",
             "Access-Control-Allow-Headers", "Content-Type,Authorization");
 
     private static APIGatewayProxyResponseEvent json(int statusCode, String body) {

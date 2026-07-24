@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
 import java.util.HashMap;
@@ -16,12 +18,18 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProfileApiHandlerTest {
 
     private static final String TABLE = "profiles-test";
+    private static final String BUCKET = "photo-bucket-test";
+    private static final String CLOUDFRONT_DOMAIN = "photos.example.com";
+    private static final String REGION = "ap-southeast-2";
+    private static final StaticCredentialsProvider CREDENTIALS_PROVIDER = StaticCredentialsProvider.create(
+            AwsBasicCredentials.create("test-access-key", "test-secret-key"));
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private InMemoryDynamoDb db;
@@ -30,7 +38,7 @@ class ProfileApiHandlerTest {
     @BeforeEach
     void setUp() {
         db = new InMemoryDynamoDb();
-        handler = new ProfileApiHandler(db, TABLE);
+        handler = new ProfileApiHandler(db, TABLE, BUCKET, CLOUDFRONT_DOMAIN, CREDENTIALS_PROVIDER, REGION);
         db.seed(Map.of(
                 "sub", AttributeValue.fromS("sub-123"),
                 "email", AttributeValue.fromS("amy@example.com"),
@@ -50,6 +58,23 @@ class ProfileApiHandlerTest {
         assertEquals("Amy", body.get("givenName").asText());
         assertEquals("Pond", body.get("familyName").asText());
         assertEquals("AP", body.get("initials").asText());
+        assertFalse(body.has("photoUrl"), "photoUrl must be omitted when no photo was ever uploaded");
+    }
+
+    @Test
+    void getOwnProfileIncludesPhotoUrlWhenPhotoKeyIsSet() throws Exception {
+        db.seed(Map.of(
+                "sub", AttributeValue.fromS("sub-with-photo"),
+                "email", AttributeValue.fromS("rory@example.com"),
+                "givenName", AttributeValue.fromS("Rory"),
+                "familyName", AttributeValue.fromS("Williams"),
+                "photoKey", AttributeValue.fromS("photos/sub-with-photo/abc-123")));
+
+        APIGatewayProxyResponseEvent response =
+                handler.handleRequest(request("GET", "/profile", "sub-with-photo"), null);
+
+        JsonNode body = JSON.readTree(response.getBody());
+        assertEquals("https://photos.example.com/photos/sub-with-photo/abc-123", body.get("photoUrl").asText());
     }
 
     @Test
@@ -114,6 +139,25 @@ class ProfileApiHandlerTest {
         assertEquals("Pond", body.get("familyName").asText());
         assertEquals("AP", body.get("initials").asText());
         assertFalse(body.has("email"), "email is PII and must never appear in public views");
+        assertFalse(body.has("photoUrl"), "photoUrl must be omitted when no photo was ever uploaded");
+    }
+
+    @Test
+    void getAnotherUsersProfileIncludesPhotoUrlWhenPhotoKeyIsSet() throws Exception {
+        db.seed(Map.of(
+                "sub", AttributeValue.fromS("sub-with-photo"),
+                "email", AttributeValue.fromS("rory@example.com"),
+                "givenName", AttributeValue.fromS("Rory"),
+                "familyName", AttributeValue.fromS("Williams"),
+                "photoKey", AttributeValue.fromS("photos/sub-with-photo/abc-123")));
+
+        APIGatewayProxyResponseEvent response = handler.handleRequest(
+                request("GET", "/profiles/{sub}", "sub-456")
+                        .withPathParameters(Map.of("sub", "sub-with-photo")),
+                null);
+
+        JsonNode body = JSON.readTree(response.getBody());
+        assertEquals("https://photos.example.com/photos/sub-with-photo/abc-123", body.get("photoUrl").asText());
     }
 
     @Test
@@ -183,6 +227,31 @@ class ProfileApiHandlerTest {
     }
 
     @Test
+    void postProfilePhotoReturnsAPresignedPostScopedToTheCallersOwnSub() throws Exception {
+        APIGatewayProxyResponseEvent response =
+                handler.handleRequest(request("POST", "/profile/photo", "sub-123"), null);
+
+        assertEquals(200, response.getStatusCode());
+        JsonNode body = JSON.readTree(response.getBody());
+        assertEquals("https://photo-bucket-test.s3.ap-southeast-2.amazonaws.com/", body.get("url").asText());
+        JsonNode fields = body.get("fields");
+        assertTrue(fields.get("key").asText().matches("photos/sub-123/[0-9a-f-]{36}"),
+                "key must be photos/{callerSub}/{fresh uuid}, never client-supplied");
+        assertTrue(fields.has("policy"));
+        assertTrue(fields.has("x-amz-signature"));
+    }
+
+    @Test
+    void postProfilePhotoGeneratesAFreshKeyOnEveryCall() throws Exception {
+        JsonNode first = JSON.readTree(
+                handler.handleRequest(request("POST", "/profile/photo", "sub-123"), null).getBody());
+        JsonNode second = JSON.readTree(
+                handler.handleRequest(request("POST", "/profile/photo", "sub-123"), null).getBody());
+
+        assertNotEquals(first.get("fields").get("key").asText(), second.get("fields").get("key").asText());
+    }
+
+    @Test
     void thereIsNoDeleteOrCreateEndpoint() {
         assertEquals(404, handler.handleRequest(request("DELETE", "/profile", "sub-123"), null).getStatusCode());
         assertEquals(404, handler.handleRequest(request("POST", "/profiles", "sub-123"), null).getStatusCode());
@@ -197,7 +266,7 @@ class ProfileApiHandlerTest {
 
         for (APIGatewayProxyResponseEvent response : responses) {
             assertEquals("*", response.getHeaders().get("Access-Control-Allow-Origin"));
-            assertEquals("GET,PUT,OPTIONS", response.getHeaders().get("Access-Control-Allow-Methods"));
+            assertEquals("GET,PUT,POST,OPTIONS", response.getHeaders().get("Access-Control-Allow-Methods"));
             assertEquals("Content-Type,Authorization", response.getHeaders().get("Access-Control-Allow-Headers"));
         }
     }
