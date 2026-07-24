@@ -9,6 +9,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 class PostConfirmationHandlerTest {
@@ -38,7 +39,7 @@ class PostConfirmationHandlerTest {
         assertEquals("amy@example.com", row.get("email").s());
         assertEquals("Amy", row.get("givenName").s());
         assertEquals("Pond", row.get("familyName").s());
-        assertEquals("AP", row.get("initials").s());
+        assertNull(row.get("initials"), "initials is derived, never persisted");
     }
 
     @Test

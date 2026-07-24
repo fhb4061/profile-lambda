@@ -35,8 +35,7 @@ class ProfileApiHandlerTest {
                 "sub", AttributeValue.fromS("sub-123"),
                 "email", AttributeValue.fromS("amy@example.com"),
                 "givenName", AttributeValue.fromS("Amy"),
-                "familyName", AttributeValue.fromS("Pond"),
-                "initials", AttributeValue.fromS("AP")));
+                "familyName", AttributeValue.fromS("Pond")));
     }
 
     @Test
@@ -133,8 +132,7 @@ class ProfileApiHandlerTest {
                 "sub", AttributeValue.fromS("sub-456"),
                 "email", AttributeValue.fromS("rory@example.com"),
                 "givenName", AttributeValue.fromS("Rory"),
-                "familyName", AttributeValue.fromS("Williams"),
-                "initials", AttributeValue.fromS("RW")));
+                "familyName", AttributeValue.fromS("Williams")));
 
         APIGatewayProxyResponseEvent response =
                 handler.handleRequest(request("GET", "/profiles", "sub-456"), null);
